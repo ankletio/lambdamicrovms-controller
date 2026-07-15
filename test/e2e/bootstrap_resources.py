@@ -17,13 +17,34 @@ for them.
 
 from dataclasses import dataclass
 from acktest.bootstrapping import Resources
+from acktest.bootstrapping.iam import Role
+from acktest.bootstrapping.s3 import Bucket
 from e2e import bootstrap_directory
+
 
 @dataclass
 class BootstrapResources(Resources):
-    pass
+    BuildRole: Role = None
+    ExecutionRole: Role = None
+    CodeArtifactBucket: Bucket = None
+
+    # Non-bootstrappable outputs (populated after bootstrap)
+    CodeArtifactURI: str = ""
+    BaseImageARN: str = ""
+
+    # Images created directly via the AWS API (out-of-band from ACK) to serve
+    # as adoption test targets. Each adoption test gets its OWN image so the
+    # tests can run independently and in parallel (pytest-xdist) without racing
+    # on a shared resource — the tag test in particular mutates its image's
+    # tags, which must not perturb the read-only adopt-policy test.
+    AdoptPolicyImageName: str = ""
+    AdoptPolicyImageARN: str = ""
+    AdoptTagsImageName: str = ""
+    AdoptTagsImageARN: str = ""
+
 
 _bootstrap_resources = None
+
 
 def get_bootstrap_resources(bootstrap_file_name: str = "bootstrap.pkl") -> BootstrapResources:
     global _bootstrap_resources

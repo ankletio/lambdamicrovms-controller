@@ -1,7 +1,180 @@
 ignore:
   resource_names:
-      - MicrovmAuthToken
-      - MicrovmImage
-      - MicrovmShellAuthToken
+    - MicrovmAuthToken
+    - MicrovmShellAuthToken
+    - MicrovmImageVersion
+    - MicrovmImageBuild
+    - ManagedMicrovmImage
+    - ManagedMicrovmImageVersion
+  field_paths:
+    # ImageArn is surfaced via Status.ACKResourceMetadata.ARN (set by the
+    # create/read hooks), so drop it from the CRD to keep it out of the
+    # public API.
+    - CreateMicrovmImageOutput.ImageArn
+    # baseImageVersion is an optional build input ("use latest" when omitted).
+    # The user chooses only the MINOR component (e.g. "0"); the builder owns
+    # the patch. Create/Update responses echo a resolved MINOR.PATCH ("0.0")
+    # that the update request validator then rejects. Dropping it from the
+    # create/update OUTPUT stops the controller from persisting "0.0" into spec
+    # and re-sending it on the next update (which wedges the resource). It
+    # stays a user-settable Spec field via the create INPUT shape, and the
+    # resolved value is surfaced read-only in status.resolvedBaseImageVersion.
+    - CreateMicrovmImageOutput.BaseImageVersion
+    - UpdateMicrovmImageOutput.BaseImageVersion
+
 sdk_names:
   model_name: lambda-microvms
+
+empty_shapes:
+  - LoggingDisabled
+
+operations:
+  RunMicrovm:
+    resource_name: Microvm
+    operation_type: Create
+  TerminateMicrovm:
+    resource_name: Microvm
+    operation_type: Delete
+
+resources:
+  MicrovmImage:
+    is_arn_primary_key: true
+    ignore_idempotency_token: true
+    tags:
+      ignore: false
+    synced:
+      when:
+        - path: Status.State
+          in:
+            - "CREATED"
+            - "UPDATED"
+    updateable:
+      when:
+        - path: Status.State
+          in:
+            - "CREATED"
+            - "UPDATED"
+            - "CREATE_FAILED"
+            - "UPDATE_FAILED"
+    deletable:
+      when:
+        - path: Status.State
+          in:
+            - "CREATED"
+            - "UPDATED"
+            - "CREATE_FAILED"
+            - "UPDATE_FAILED"
+            - "DELETE_FAILED"
+    exceptions:
+      errors:
+        404:
+          code: ResourceNotFoundException
+      terminal_codes:
+        - ValidationException
+        - InvalidParameterValueException
+    fields:
+      Name:
+        is_primary_key: true
+        is_required: true
+        is_immutable: true
+      ImageIdentifier:
+        is_arn: true
+      BuildRoleArn:
+        references:
+          resource: Role
+          path: Status.ACKResourceMetadata.ARN
+          service_name: iam
+      # Full resolved base image version (e.g. "0.0"), read-only; spec holds the
+      # sanitized form (see refreshSpecFromActiveVersion).
+      ResolvedBaseImageVersion:
+        is_read_only: true
+        from:
+          operation: GetMicrovmImageVersion
+          path: BaseImageVersion
+      # These fields are written into spec from the active version on read, so
+      # late_initialize back-fills them into desired to avoid perpetual drift /
+      # endless rebuilds. (AWS also defaults egress -> [INTERNET_EGRESS] and
+      # resources -> [{minimumMemoryInMiB: 2048}] when omitted.)
+      BaseImageVersion:
+        late_initialize:
+          skip_incomplete_check: {}
+      EgressNetworkConnectors:
+        late_initialize:
+          skip_incomplete_check: {}
+      Resources:
+        late_initialize:
+          skip_incomplete_check: {}
+    hooks:
+      sdk_create_post_set_output:
+        template_path: hooks/microvm_image/sdk_create_post_set_output.go.tpl
+      sdk_read_one_post_set_output:
+        template_path: hooks/microvm_image/sdk_read_one_post_set_output.go.tpl
+      sdk_update_pre_build_request:
+        template_path: hooks/microvm_image/sdk_update_pre_build_request.go.tpl
+      sdk_update_post_set_output:
+        template_path: hooks/microvm_image/sdk_update_post_set_output.go.tpl
+
+  Microvm:
+    renames:
+      operations:
+        GetMicrovm:
+          input_fields:
+            MicrovmIdentifier: MicrovmId
+        TerminateMicrovm:
+          input_fields:
+            MicrovmIdentifier: MicrovmId
+    ignore_idempotency_token: true
+    tags:
+      ignore: true
+    synced:
+      when:
+        - path: Status.State
+          in:
+            - "RUNNING"
+            - "SUSPENDED"
+    deletable:
+      when:
+        - path: Status.State
+          in:
+            - "RUNNING"
+            - "SUSPENDED"
+    exceptions:
+      errors:
+        404:
+          code: ResourceNotFoundException
+      terminal_codes:
+        - ValidationException
+        - InvalidParameterValueException
+    fields:
+      ImageIdentifier:
+        is_required: true
+        references:
+          resource: MicrovmImage
+          path: Status.ACKResourceMetadata.ARN
+      ExecutionRoleArn:
+        references:
+          resource: Role
+          path: Status.ACKResourceMetadata.ARN
+          service_name: iam
+      EgressNetworkConnectors:
+        late_initialize:
+          skip_incomplete_check: {}
+      RunHookPayload:
+        is_secret: true
+      MicrovmId:
+        is_primary_key: true
+        is_read_only: true
+        print:
+          name: MICROVM-ID
+      MaximumDurationInSeconds:
+        late_initialize: {}
+      IngressNetworkConnectors:
+        late_initialize:
+          skip_incomplete_check: {}
+    hooks:
+      sdk_read_one_post_set_output:
+        template_path: hooks/microvm/sdk_read_one_post_set_output.go.tpl
+      sdk_delete_pre_build_request:
+        template_path: hooks/microvm/sdk_delete_pre_build_request.go.tpl
+      sdk_delete_post_request:
+        template_path: hooks/microvm/sdk_delete_post_request.go.tpl
