@@ -8,6 +8,23 @@ Kubernetes Github project.
 
 [ack-issues]: https://github.com/aws/aws-controllers-k8s/issues
 
+## Durable `RunMicrovm` idempotency
+
+This fork keeps the upstream-compatible `Microvm` CRD and requires every
+`Microvm` resource to carry the AWS idempotency token in metadata:
+
+```yaml
+metadata:
+  annotations:
+    courtx.ai/client-token: "<1-128 character stable token>"
+```
+
+The controller copies that value into `RunMicrovmInput.ClientToken` on every
+create attempt. It also preserves the original Kubernetes spec after AWS
+returns create-time defaults, so a retry after status loss sends the same token
+and request parameters. Deployments should enforce the annotation's format and
+immutability with admission policy.
+
 ## Contributing
 
 We welcome community contributions and pull requests.
