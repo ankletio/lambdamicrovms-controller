@@ -9,10 +9,36 @@ import (
 	svcapitypes "github.com/aws-controllers-k8s/lambdamicrovms-controller/apis/v1alpha1"
 )
 
+const clientTokenAnnotation = "courtx.ai/client-token"
+
 var requeueWaitWhileTerminating = ackrequeue.NeededAfter(
 	fmt.Errorf("microvm is terminating"),
 	5*time.Second,
 )
+
+// clientTokenFor returns the durable idempotency token bound to a Microvm CR.
+//
+// ClientToken intentionally remains outside Spec because upstream ACK omits
+// idempotency-only fields from its desired-state API. Kubernetes metadata is
+// persisted before reconciliation, however, so an immutable annotation gives
+// every retry of the same CR the exact token used by the original RunMicrovm
+// call.
+func clientTokenFor(r *resource) (string, error) {
+	if r == nil || r.ko == nil {
+		return "", fmt.Errorf("cannot resolve client token for a nil Microvm resource")
+	}
+	token := r.ko.GetAnnotations()[clientTokenAnnotation]
+	if token == "" {
+		return "", fmt.Errorf("required annotation %q is missing", clientTokenAnnotation)
+	}
+	if len(token) > 128 {
+		return "", fmt.Errorf(
+			"annotation %q exceeds the AWS maximum of 128 characters",
+			clientTokenAnnotation,
+		)
+	}
+	return token, nil
+}
 
 func (rm *resourceManager) isDeleting(r *resource) bool {
 	if r.ko.DeletionTimestamp != nil && !r.ko.DeletionTimestamp.IsZero() {
