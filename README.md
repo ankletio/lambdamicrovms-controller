@@ -25,6 +25,12 @@ returns create-time defaults, so a retry after status loss sends the same token
 and request parameters. Deployments should enforce the annotation's format and
 immutability with admission policy.
 
+When the controller uses IRSA/web-identity credentials, also set a stable
+`AWS_ROLE_SESSION_NAME` on the controller Deployment. In live testing, two
+identical requests in one controller process were idempotent, but a retry from
+a replacement pod was rejected until both pods used the same assumed-role
+session name. The AWS API reference does not currently document this scope.
+
 ## Contributing
 
 We welcome community contributions and pull requests.
